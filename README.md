@@ -1,5 +1,12 @@
 # RAG with TiDB and Ollama Tutorial  
 
+## 🎥 Video Walkthrough
+
+You can watch the video version of this tutorial here:  
+[▶ Watch on YouTube](https://youtu.be/0jhS3ABn-GU)
+
+## Details:
+
 This repository contains a step-by-step tutorial on how to build a **local Retrieval-Augmented Generation (RAG) chatbot** using:  
 
 - **TiDB** with the `VECTOR` data type  
