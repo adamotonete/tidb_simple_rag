@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Build a Local RAG Chatbot with TiDB and Ollama</title>
+  <style>
+:root { --bg:#0b0f19; --fg:#e6e9ef; --border:#1f2736; --code:#0d1117; --accent:#7aa2f7; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Arial; line-height:1.6; }
+.container { max-width:900px; margin:0 auto; padding:2rem 1.2rem 4rem; }
+h1,h2,h3,h4,h5,h6 { margin:1.6rem 0 0.6rem; line-height:1.25; }
+h1{font-size:2rem;} h2{font-size:1.6rem;} h3{font-size:1.3rem;}
+hr{border:0;border-top:1px solid var(--border);margin:1.6rem 0;}
+a{color:var(--accent);text-decoration:none;} a:hover{text-decoration:underline;}
+ul{padding-left:1.1rem;}
+pre{background:var(--code);border:1px solid var(--border);padding:1rem;border-radius:12px;overflow-x:auto;}
+code{background:rgba(255,255,255,0.08);padding:0.08rem 0.35rem;border-radius:6px;}
+pre code{background:transparent;padding:0;border-radius:0;color:#d1e8ff;display:block;white-space:pre;}
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1>Build a Local RAG Chatbot with TiDB and Ollama</h1>
+
+<h2>Author Disclaimer  </h2>
+
+<p>I usually work with <strong>databases</strong>, not with RAG or AI systems. This tutorial was created as part of my own learning journey, and I used AI tools to help me write some parts of it.</p>
+      <p>There are probably better ways to embed and organize documentation, and the LLM may sometimes hallucinate.</p>
+      <p>For this tutorial, I also assume that you are already somewhat familiar with the concepts of <strong>RAG (Retrieval‑Augmented Generation)</strong>, <strong>embeddings</strong>, and <strong>AI models</strong> in general. If you are completely new to these topics, please review introductory material first, as this article does not cover the basics.</p>
+      <p>Still, I wanted to share what I learned because I believe it might help others get started. If you have ideas for improvements, I’d be happy to learn from your feedback.</p>
+
+<hr/>
+
+<h2>🔹 Introduction  </h2>
+
+<p>We’ll build a <strong>Retrieval-Augmented Generation (RAG)</strong> pipeline using:  </p>
+
+<ul>
+<li><strong>Ollama</strong> → for local embeddings + LLM inference  </li>
+<li><strong>TiDB</strong> → MySQL-compatible database with native <code>VECTOR</code> type  </li>
+<li><strong>Python</strong> → to glue everything together  </li>
+</ul>
+
+<p>⚠️ <strong>Hardware Note:</strong>  </p>
+<p>Running embeddings and <strong>Gemma 12B</strong> locally requires a <strong>GPU with ≥12GB VRAM</strong> or a <strong>Apple (M1/M2/M3/M4) with 16GB+ RAM</strong>.  </p>
+<p>On CPU only, things will still work but <strong>very slowly</strong>.  </p>
+
+<hr/>
+
+<h2>🔹 1. Install TiDB with TiUP  </h2>
+
+<pre><code class="language-bash">
+curl --proto '=https' --tlsv1.2 -sSf https://tiup.io/install.sh | sh
+source ~/.bash_profile   # or ~/.zshrc if using zsh
+tiup --version
+</code></pre>
+
+<p>Start a TiDB Playground:  </p>
+
+<pre><code class="language-bash">
+tiup playground v8.5.3 --db 1 --pd 1 --without-monitor
+</code></pre>
+
+<p>Default connection:  </p>
+<ul>
+<li>Host: <code>127.0.0.1</code>  </li>
+<li>Port: <code>4000</code>  </li>
+<li>User: <code>root</code>  </li>
+<li>Password: *(empty)*  </li>
+</ul>
+
+<p>Set password:  </p>
+
+<pre><code class="language-sql">
+ALTER USER 'root'@'%' IDENTIFIED BY 'mypass123';
+FLUSH PRIVILEGES;
+</code></pre>
+
+<hr/>
+
+<h2>🔹 2. Install Ollama and Models  </h2>
+
+<pre><code class="language-bash">
+ollama pull nomic-embed-text:v1.5   # embeddings
+ollama pull gemma3:12b              # LLM for answers
+</code></pre>
+
+<hr/>
+
+<h2>🔹 3. Python Virtual Environment  </h2>
+
+<p>Always use a virtual environment to keep dependencies isolated:  </p>
+
+<pre><code class="language-bash">
+# Create a venv
+cd $repository_path -> place where this repository was cloned
+
+python3 -m venv .
+
+# Activate it (Linux/Mac)
+source bin/activate
+
+</code></pre>
+
+<p>Install requirements:  </p>
+
+<pre><code class="language-bash">
+pip install pymupdf pymysql ollama
+</code></pre>
+
+<hr/>
+
+<h2>🔹 4. Create Table in TiDB  </h2>
+
+<pre><code class="language-sql">
+CREATE DATABASE IF NOT EXISTS rag;
+USE rag;
+
+CREATE TABLE documentation_chunks (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(255),
+    page INT,
+    chunk_type ENUM('text','code','index'),
+    content TEXT,
+    embedding VECTOR(768)
+);
+</code></pre>
+
+<p>⚠️ <strong>Note:</strong> TiDB supports <strong>nearest-neighbor vector indexes</strong> using the <strong>HNSW (Hierarchical Navigable Small World) algorithm</strong>, but these rely on <strong>TiFlash replicas</strong>.  </p>
+<p>Vector indexes can greatly improve search performance in production workloads.  </p>
+
+<p>For simplicity, this tutorial does <strong>not</strong> use TiFlash or ANN indexes. We’ll rely on a straightforward vector scan.  </p>
+
+<hr/>
+
+<h2>🔹 5. Preparing the Documentation PDF  </h2>
+
+<p>I followed the official PingCAP tutorial to generate the docs PDF:</p>
+<p>
+  <a href="https://github.com/pingcap/docs/blob/master/resources/tidb-pdf-generation-tutorial.md" target="_blank">
+    TiDB PDF Generation Tutorial
+  </a>
+</p>
+<p>This produces <code>output.pdf</code> which we’ll ingest.</p>
+
+<hr/>
+
+<h2>🔹 6. Ingest PDF into TiDB  </h2>
+
+<p>Main rules:  </p>
+<ul>
+<li>Chunks = 1000 chars with 300 overlap.  </li>
+<li>Chunks shorter than 200 chars = index.  </li>
+<li>Chunks with ≥5 dots (<code>.....</code>) = index (table of contents entries).  </li>
+<li>No images are saved (text-only).  </li>
+</ul>
+
+<p>Save as <code>load.py</code> (script we built earlier).  </p>
+
+<p>Run:  </p>
+
+<pre><code class="language-bash">
+python load.py
+</code></pre>
+
+<p>Output:  </p>
+
+<pre><code class="language-">
+✅ Progress: 200/1800 pages (11.1%) - elapsed 3.2 min, ETA 25.4 min
+🎉 Done: All pages processed and saved in TiDB.
+</code></pre>
+
+<hr/>
+
+<h2>🔹 7. Query with RAG Chatbot  </h2>
+
+<p>Save as <code>chat.py</code> (text-only, excludes index chunks).  </p>
+
+<p>Run:  </p>
+
+<pre><code class="language-bash">
+python chat.py
+</code></pre>
+
+<p>⚠️ <strong>Note:</strong> The LLM may hallucinate. Always verify answers against official TiDB docs.  </p>
+
+<p>Example:  </p>
+
+<pre><code class="language-">
+💬 RAG Chatbot ready! Type 'exit' to quit.
+
+You: How do I create a table in TiDB?
+
+📖 Retrieved context:
+- SQL Statements (page 45)
+- CREATE TABLE docs (page 46)
+
+🤖 Answer:
+In TiDB, you create a table using the SQL `CREATE TABLE` statement…
+✅ Done.
+</code></pre>
+
+<div class="note">
+      💡 <strong>Extra Option:</strong> If you want to try the chatbot in different languages, 
+      I also provide a file called <code>chat_multi_language.py</code>. This version will ask you 
+      which language you prefer for the answers when starting the program, so you can easily switch 
+      between English, Portuguese, Spanish, or others.
+    </div>
+
+<hr/>
+
+<h2>Conclusion  </h2>
+
+<p>With less than 300 lines of Python, we built a <strong>local RAG chatbot</strong> that:  </p>
+
+<ul>
+<li>Stores docs in <strong>TiDB VECTOR(768)</strong>  </li>
+<li>Embeds with <strong>embeddinggemma</strong>  </li>
+<li>Uses <strong>Gemma 12B</strong> for answers  </li>
+<li>Streams results in chat  </li>
+</ul>
+
+<p>Along the way we learned that:  </p>
+<ul>
+<li><strong>Chunk size matters</strong> → 1500/250 gave richer, more contextual answers.  </li>
+<li><strong>Noise filtering</strong> → excluding table of contents entries and tiny chunks improved retrieval.  </li>
+<li><strong>TiDB + VECTOR</strong> → a solid mix of SQL + semantic search.  </li>
+<li><strong>Ollama local inference</strong> → keeps it private, no API bills.  </li>
+<li><strong>LLM hallucinations</strong> → always validate against docs.  </li>
+<li><strong>TiFlash vector indexes</strong> → TiDB supports HNSW ANN indexes with TiFlash replicas, which can provide better performance for large-scale workloads. For simplicity, this article did not use them.  </li>
+</ul>
+
+<p>⚠️ This pipeline is practical only with <strong>GPU/Apple Silicon hardware</strong>. On CPU, queries may take minutes.  </p>
+
+<hr/>
+
+
+<h2>🎥 Video Walkthrough</h2>
+<p>You can watch the video version of this tutorial here:</p>
+<p><a href="https://youtu.be/0jhS3ABn-GU" target="_blank">▶ Watch on YouTube</a></p>
+
+<h2>Side notes</h2>
+<p>There are probably better ways to embed and organize documentation, and the LLM may sometimes hallucinate.  </p>
+
+<p>Still, I wanted to share what I learned because I believe it might help others get started. If you have ideas for improvements, I’d be happy to learn from your feedback.  </p>
+  </div>
+</body>
+</html>
