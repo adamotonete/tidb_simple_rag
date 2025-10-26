@@ -28,7 +28,7 @@ The tutorial shows how to:
 
 ## Repository Contents  
 - `tidb_docs_pdf.txt` → link to an already generated TiDB documentation in pdf
-- `rag_tidb_ollama.html` → styled HTML version for publishing  
+- `docs/index.html` → styled HTML version for publishing  
 - `load.py` → script to split and embed documentation into TiDB  
 - `chat.py` → chatbot script that retrieves context and answers questions  
 
@@ -39,15 +39,15 @@ The tutorial shows how to:
 1. Install [TiUP](https://tiup.io/) and start TiDB Playground.  
 2. Install [Ollama](https://ollama.ai) and pull the models:  
    ```bash
-   ollama pull embeddinggemma
-   ollama pull gemma:12b
+   ollama pull nomic-embed-text:v1.5
+   ollama pull gemma3:12b
 3. Create a Python virtual environment and install requirements:
    ```
    python3 -m venv rag_tidb
    source rag_tidb/bin/activate
    pip install pymupdf pymysql ollama
    ```
-4. Follow the tutorial in `rag_tidb_ollama.html`
+4. Follow the tutorial in `docs/index.html`
 
 ## Author Note
 
