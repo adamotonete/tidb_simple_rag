@@ -56,7 +56,7 @@ while True:
         SELECT id, title, page, chunk_type, content
         FROM documentation_chunks
         WHERE chunk_type IN ('text','code')  -- exclude 'index'
-        ORDER BY VEC_L2_DISTANCE(embedding, VEC_FROM_TEXT(%s))
+        ORDER BY VEC_COSINE_DISTANCE(embedding, VEC_FROM_TEXT(%s))
         LIMIT {TOP_K};
     """
     cursor.execute(sql, (q_emb_text,))
