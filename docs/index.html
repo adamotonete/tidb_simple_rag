@@ -88,11 +88,15 @@ ollama pull gemma3:12b              # LLM for answers
 
 <hr/>
 
-<h2>🔹 3. Python Virtual Environment  </h2>
+<h2>🔹 3. Python Virtual Environment  + Github Repo </h2>
 
 <p>Always use a virtual environment to keep dependencies isolated:  </p>
 
 <pre><code class="language-bash">
+
+# Clone the repository:
+git clone https://github.com/adamotonete/tidb_simple_rag.git
+
 # Create a venv
 cd $repository_path -> place where this repository was cloned
 
@@ -156,7 +160,7 @@ CREATE TABLE documentation_chunks (
 <li>No images are saved (text-only).  </li>
 </ul>
 
-<p>Save as <code>load.py</code> (script we built earlier).  </p>
+<p>File name: <code>load.py</code>  </p>
 
 <p>Run:  </p>
 
@@ -175,7 +179,7 @@ python load.py
 
 <h2>🔹 7. Query with RAG Chatbot  </h2>
 
-<p>Save as <code>chat.py</code> (text-only, excludes index chunks).  </p>
+<p>File name: <code>chat.py</code>  </p>
 
 <p>Run:  </p>
 
